@@ -29,14 +29,38 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
 });
 
+const crypto = require('crypto');
+
+// ... (imports remain)
+
+const app = express();
+const port = process.env.PORT || 3000;
+// Don't read AUTH_TOKEN here, read it inside middleware to ensure env is loaded or handle missing case
+
+// ... (upload config remains)
+
 // Middleware: Bearer Token Auth
 const authenticate = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ error: 'Missing authorization header' });
   
-  const token = authHeader.split(' ')[1];
-  if (token !== AUTH_TOKEN) {
-    console.warn(`[AUTH FAILED] Invalid token attempt: ${token}`);
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return res.status(401).json({ error: 'Invalid authorization header format' });
+  }
+  
+  const token = parts[1];
+  const validToken = process.env.SCANWOW_TOKEN;
+
+  if (!validToken) {
+    console.error('FATAL: SCANWOW_TOKEN is not set in environment.');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  // Timing-safe comparison to prevent timing attacks
+  // Compare length first (leaks length but that's acceptable for tokens)
+  if (token.length !== validToken.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(validToken))) {
+    console.warn(`[AUTH FAILED] Invalid token attempt`);
     return res.status(403).json({ error: 'Invalid token' });
   }
   next();

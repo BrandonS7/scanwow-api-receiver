@@ -10,7 +10,24 @@ UPLOAD_DIR = 'uploads'
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-AUTH_TOKEN = os.environ.get('SCANWOW_TOKEN', 'test')
+import secrets
+
+app = Flask(__name__)
+
+# Config
+UPLOAD_DIR = 'uploads'
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+# DoS Protection: Limit upload size to 50MB
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
+# Require explicit token setting (Fail safe)
+AUTH_TOKEN = os.environ.get('SCANWOW_TOKEN')
+if not AUTH_TOKEN:
+    # Use a print instead of raise so it doesn't crash immediately on import/gunicorn
+    # but middleware will fail. Ideally crash early.
+    print("FATAL: SCANWOW_TOKEN environment variable must be set.")
 
 # Middleware: Auth
 @app.before_request
@@ -22,10 +39,15 @@ def check_auth():
     auth = request.headers.get('Authorization')
     if not auth or len(auth.split(' ')) < 2:
         return jsonify({'error': 'Missing Authorization header'}), 401
+    
+    if not AUTH_TOKEN:
+        return jsonify({'error': 'Server misconfigured: Missing SCANWOW_TOKEN'}), 500
         
     token = auth.split(' ')[1]
-    if token != AUTH_TOKEN:
-        print(f"[AUTH FAILED] Invalid token attempt: {token}")
+    
+    # Timing-safe comparison
+    if not secrets.compare_digest(token, AUTH_TOKEN):
+        print(f"[AUTH FAILED] Invalid token attempt")
         return jsonify({'error': 'Invalid token'}), 403
 
 @app.route('/api/scans', methods=['POST'])
